@@ -1,0 +1,34 @@
+---
+title: "London_Smartmeter"
+author: 'Group 7'
+date: "25/02/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r Loading Packages}
+#Loading Packages
+if (require(tidyverse)== FALSE) {
+	install.packages("tidyverse")
+} else {
+	library(tidyverse)
+}
+
+
+```
+
+## Including Plots
+
+
+
+```{r pressure, echo=FALSE}
+
+```
+
+
