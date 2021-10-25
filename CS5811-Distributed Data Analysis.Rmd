@@ -1,0 +1,1152 @@
+---
+title: "CS5811 Coursework"
+author: '1829344'
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+version: 1
+---
+
+
+
+
+
+<center>
+![](Brunel_logo.jpg){width=45%}
+
+</center>
+
+
+
+
+
+
+<center> <h1>Brunel Computer Science Department  </h1> </center>
+
+
+
+
+
+
+<center> <h1><u>London Smart Meter Data Analysis.</h1> </u></center>      
+
+
+<style type="text/css">
+h1.title {
+  font-size: 40px;
+  color: #1e334d;
+  text-align: center;
+}
+
+h4.author { /* Header 4 - and the author and data headers use this too  */
+    font-size: 18px;
+  font-family: "Times New Roman", Times, serif;
+  color: #1e334d;
+  text-align: center;
+}
+h4.date { /* Header 4 - and the author and data headers use this too  */
+  font-size: 18px;
+  font-family: "Times New Roman", Times, serif;
+  color: #1e334d;
+  text-align: center;
+}
+</style>
+
+
+
+
+
+
+## 1. Packages and Functions  
+
+### Packages 
+
+```{r}
+
+#### Loading Packages ####
+# Data wrangling, Cleaning and processing
+  library(tidyverse)
+  library(validate)
+ # Exploratory Data Analysis
+  library(wordcloud)
+  library(RColorBrewer)
+  library(tm)
+  library(SnowballC)
+  library(reshape2)
+  library(corrplot)
+# Supervised Learning & ML pre-processing
+  library(caret)
+  library(caTools)
+  library(e1071)
+  library(ROSE)
+  library(rpart)
+  library(pROC)
+  library(ROCR)
+# Unsupervised Learning
+  library(factoextra)
+  library(fpc)
+  library(FactoMineR)
+  library(cluster)
+  library(kohonen)
+# Supervised Learning
+  library(randomForest)
+
+```
+
+
+### Functions
+
+```{r}
+
+#### sums NA values then uses the apply family of functions to obtain NA values per column ####
+
+AppSumNa = function(x){
+  ty = is.na(x)
+  yt= function(y){
+    sum(ty)
+  }
+  yy = apply(x, 2, yt)
+  return(yy)
+}
+
+#### MinMax normalization ####
+
+MinMax=function(x){
+  ty = (x-min(x))/(max(x)-min(x))
+  
+}
+
+#### Z-score normalisation ####
+
+Zscore = function(x){
+
+    mu = mean(x)
+    sd = sd(x)
+    op = ((x - mu) / sd )
+  
+}
+
+#### Stratified Sampling Function ####
+
+stratified = function(df, group, size, select = NULL, 
+                       replace = FALSE, bothSets = FALSE) {
+  if (is.null(select)) {
+    df <- df
+  } else {
+    if (is.null(names(select))) stop("'select' must be a named list")
+    if (!all(names(select) %in% names(df)))
+      stop("Please verify your 'select' argument")
+    temp <- sapply(names(select),
+                   function(x) df[[x]] %in% select[[x]])
+    df <- df[rowSums(temp) == length(select), ]
+  }
+  df.interaction <- interaction(df[group], drop = TRUE)
+  df.table <- table(df.interaction)
+  df.split <- split(df, df.interaction)
+  if (length(size) > 1) {
+    if (length(size) != length(df.split))
+      stop("Number of groups is ", length(df.split),
+           " but number of sizes supplied is ", length(size))
+    if (is.null(names(size))) {
+      n <- setNames(size, names(df.split))
+      message(sQuote("size"), " vector entered as:\n\nsize = structure(c(",
+              paste(n, collapse = ", "), "),\n.Names = c(",
+              paste(shQuote(names(n)), collapse = ", "), ")) \n\n")
+    } else {
+      ifelse(all(names(size) %in% names(df.split)),
+             n <- size[names(df.split)],
+             stop("Named vector provided with names ",
+                  paste(names(size), collapse = ", "),
+                  "\n but the names for the group levels are ",
+                  paste(names(df.split), collapse = ", ")))
+    }
+  } else if (size < 1) {
+    n <- round(df.table * size, digits = 0)
+  } else if (size >= 1) {
+    if (all(df.table >= size) || isTRUE(replace)) {
+      n <- setNames(rep(size, length.out = length(df.split)),
+                    names(df.split))
+    } else {
+      message(
+        "Some groupings\n---",
+        paste(names(df.table[df.table < size]), collapse = ", "),
+        "---\ncontain less observations",
+        " than required number of samples.\n",
+        "All observations have been returned from their groups.")
+      n <- c(sapply(df.table[df.table >= size], function(x) x = size),
+             df.table[df.table < size])
+    }
+  }
+  temp <- lapply(
+    names(df.split),
+    function(x) df.split[[x]][sample(df.table[x],
+                                     n[x], replace = replace), ])
+  set1 <- do.call("rbind", temp)
+  
+  if (isTRUE(bothSets)) {
+    set2 <- df[!rownames(df) %in% rownames(set1), ]
+    list(SET1 = set1, SET2 = set2)
+  } else {
+    set1
+  }
+}
+# [1]- Stratified Sampling code obtained from github 
+```
+
+
+
+
+
+## 2. Data Preparation and Cleaning  
+
+### Importing and Inspecting datasets 
+
+```{r}
+
+# Loading information household dataset 
+
+inform = read.csv("informations_households.csv")
+
+#### Loading daily consumption dataset ####
+
+daily = read.csv("dd.csv")
+
+#### Loading daily weather dataset ####
+
+weather = read.csv("weather_daily_darksky.csv")
+
+```
+
+
+
+### Data Preparation before joining 
+
+```{r}
+
+# Removing columns that are not required from the weather dataset before joining
+
+weather = weather[,c(1,4,7,8,12,13,14,19,22,23,27)]
+
+#### Changing weather to date format for the join between datasets ####
+
+weather$time = as.Date(weather$time)
+
+```
+
+
+
+### Joining 3 Datasets 
+
+```{r}
+
+# Joining daily dataset using local id column
+
+joined_set = inner_join(daily,inform,by="LCLid")
+joined_set$day =  as.Date(joined_set$day,format = "%d/%m/%Y")
+
+# Joining weather data to the dataset
+
+london_smart_meter = inner_join(joined_set,weather,by=c("day"="time"))
+
+```
+
+
+
+### Creating new features and renaming columns for analysis 
+
+```{r}
+
+# Creating a variable to store date
+
+date = london_smart_meter$day
+
+date_day = weekdays(date)
+date_month = months(date)
+
+# Transform date into character
+
+date = as.character(date)
+
+# Subset string to extract desired characters
+
+character_manipulation = stringr::str_sub(date,end = 4)
+
+london_smart_meter$year = character_manipulation
+london_smart_meter$weekday = date_day
+london_smart_meter$month = date_month
+
+# Removing a ACORN data quality issue
+
+london_smart_meter = london_smart_meter %>% 
+  filter(Acorn_grouped !="ACORN-",
+         Acorn_grouped !="ACORN-U",
+         year!="2011")
+
+
+# Renaming day column as date
+london_smart_meter = london_smart_meter %>% 
+  rename(date = day)
+
+```
+
+
+
+### Stratified Sampling 
+
+```{r}
+
+# Set seed for reproducible results
+
+set.seed(1)
+
+# Preserving original set temporarily for comparison
+
+comparison = london_smart_meter
+
+# Stratified sampling arguments
+
+london_smart_meter = stratified(london_smart_meter, "Acorn_grouped", .06)
+
+
+# Checking to make sure that sample is stratified according to Acorn_grouped
+
+london_smart_meter %>% 
+    count(Acorn_grouped) %>% 
+    mutate(total=nrow(london_smart_meter)) %>% 
+    summarise(Acorn_grouped,n, n/total)
+
+comparison %>% 
+    count(Acorn_grouped) %>% 
+    mutate(total=nrow(comparison)) %>% 
+    summarise(Acorn_grouped,n, n/total)
+
+# Removing the variables used for verification of the sampling preserving the data's structural properties  
+
+rm(comparison)
+
+# Removing unnecessary variables to avoid clogging up ram
+
+rm(inform)
+rm(weather)
+rm(joined_set)
+rm(date)
+rm(date_day)
+rm(date_month)
+rm(daily)
+
+```
+
+
+
+
+### Data Cleaning and preparation 
+
+```{r}
+
+# Checking the sum of NA's in the data
+ AppSumNa(london_smart_meter)
+
+# Dropping NA's in question
+
+noNa_london_smart_meter= na.omit(london_smart_meter)
+rm(london_smart_meter)
+
+#Re-ordering the columns in the data
+
+smart_meter_london = noNa_london_smart_meter[,c(1,2,24,25,26,10,11,12,3,6,4,5,7,
+                                                8,9,14,16,17,19,20,21,22,23,18,15,13)]
+
+# Checking if there are any remaining NA's 
+
+AppSumNa(smart_meter_london)
+
+# Removing no NA dataset
+
+rm(noNa_london_smart_meter)
+
+
+```
+
+
+
+
+
+### Data Cleaning and Preparation- II 
+
+```{r}
+#Data cleaning and preparation.
+
+smart_meter_london$icon = as.factor(smart_meter_london$icon)
+smart_meter_london$stdorToU = as.factor(smart_meter_london$stdorToU)
+smart_meter_london$Acorn = as.character(smart_meter_london$Acorn)
+smart_meter_london$Acorn_grouped = as.factor(smart_meter_london$Acorn_grouped)
+smart_meter_london$precipType = as.factor(smart_meter_london$precipType)
+smart_meter_london$Acorn = as.factor(smart_meter_london$Acorn)
+smart_meter_london$year = as.factor(smart_meter_london$year)
+smart_meter_london$weekday = as.factor(smart_meter_london$weekday)
+smart_meter_london$month = as.factor(smart_meter_london$month)
+
+
+```
+
+
+
+
+### Data validity check 
+
+```{r}
+
+# Validating the quality of the data
+
+smart_meter_rules = validate::validator(NonNegMedian = energy_median >= 0,
+                              NonNegMean = energy_mean >= 0,
+                              NonNegMax = energy_max >= 0,
+                              NonNegCount = energy_count >= 0,
+                              EnergyCountVal = energy_count == 48,
+                              NonNegStd = energy_std >= 0,
+                              NonNegSum = energy_sum >= 0 & energy_sum < 23,
+                              NonNegMin = energy_min >= 0,
+                              okMaxTemp = temperatureMax <= 38.7,
+                              okMinTemp = temperatureMin >= -27,
+                              NonNegwindBearing = windBearing >=0,
+                              NonNegcloudCover = cloudCover >= 0,
+                              NonNegwindSpeed = windSpeed >= 0,
+                              NonNegvisibility = visibility >=0,
+                              NonNeghumidity = humidity >= 0,
+                              okcloudcover = cloudCover >= 0)
+
+
+check <- confront(smart_meter_london, smart_meter_rules)  
+
+
+#check
+barplot(check)
+
+
+# Cleaning the quality issue with energy count
+
+smart_meter_london = smart_meter_london %>% 
+   filter(energy_count == 48)
+
+```
+
+
+
+
+### Removing outliers
+
+```{r}
+
+# Interquartile range using summary function
+
+summary(smart_meter_london$energy_sum)
+
+#  Boxplot displaying outliers 
+
+smartmeterboxplot = boxplot(smart_meter_london$energy_sum,horizontal = TRUE,col = "lightblue", main="Daily Energy Consumption",xlab= "Kilowatts per day")
+
+# removing outliers 
+
+min_energysum = min(smartmeterboxplot$out)
+
+# Storing the outlier free dataset
+outliers = smart_meter_london[smart_meter_london$energy_sum > min_energysum , ]
+smart_meter_london = smart_meter_london[smart_meter_london$energy_sum < min_energysum , ]
+
+# Analysing outliers
+
+ outliers %>% 
+  group_by(Acorn_grouped,year) %>% 
+  top_n(energy_sum,10) %>% 
+  arrange(desc(energy_sum)) %>% 
+  count(month,sort=TRUE)
+
+
+# Checking to ensure dataset does not contain outliers
+
+summary(smart_meter_london$energy_sum)
+
+# Plotting boxplot to show outliers were removed
+boxplot(smart_meter_london$energy_sum,horizontal = TRUE,col = "lightblue", main="Daily Energy Consumption",xlab= "Kilowatts per day")
+
+summary(smart_meter_london$energy_sum)
+
+#Using z-score as a more stringent method to remove outliers
+
+z = Zscore(smart_meter_london$energy_sum)
+
+# Storing variable with z score in smart meter london dataframe
+smart_meter_london$z = z
+
+# Filter values that are less than 3 and more than -3 to remove outliers
+
+smart_meter_london = smart_meter_london %>% 
+  filter(z < 3,
+         z >-3)
+
+# Verify operation visually and stastitically
+summary(smart_meter_london$energy_sum)
+boxplot(smart_meter_london$energy_sum,horizontal = TRUE,col = "lightblue", main="Daily Energy Consumption",xlab= "Kilowatts per day")
+
+# Remove z-score value for energy_sum london
+smart_meter_london$z = NULL
+```
+
+
+
+
+### Creating Categorical Variable from energy
+
+```{r}
+# Variable creation
+
+# Creating labels for the classifier
+
+summary(smart_meter_london$energy_sum)
+smart_meter_london$energy_usage = ifelse(smart_meter_london$energy_sum > 8.15, "normal","high")
+smart_meter_london$energy_usage = as.factor(smart_meter_london$energy_usage)
+
+table(smart_meter_london$energy_usage)
+
+
+```
+
+
+
+## Exploratory Data Analysis- Smart Meter London 
+
+### Word Cloud part 
+
+```{r}
+
+# setting seed for the reproducibility of the word cloud
+
+set.seed(8)
+
+# Collapsing spaces and storing the values inside a variable
+
+words = paste(smart_meter_london$summary, collapse =" ")
+
+# Removing superfluous words
+
+words = stringr::str_remove_all(words,"throughout")
+words = stringr::str_remove_all(words,"mostly")
+words = stringr::str_remove_all(words,"partly")
+words = stringr::str_remove_all(words,"day")
+words = stringr::str_remove_all(words,"afternoon")
+words = stringr::str_remove_all(words,"evening")
+words = stringr::str_remove_all(words,"mostly")
+words = stringr::str_remove_all(words,"partly")
+words = stringr::str_remove_all(words,"overnight")
+words = stringr::str_remove_all(words,"morning")
+words = stringr::str_remove_all(words,"continuing")
+words = stringr::str_remove_all(words,"starting")
+
+
+# Wordcloud generation
+wordcloud(words = words, min.freq = 1,
+          max.words=2000, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+
+# Removing unnecessary components that will not be used in the EDA
+
+smart_meter_london$summary = NULL
+rm(character_manipulation)
+
+```
+
+
+
+
+### Descriptive Statistics
+
+```{r}
+
+# Summary of all the variables 
+summary(smart_meter_london)
+
+# Total amount of energy consumption from 2012-2014
+sum(smart_meter_london$energy_sum)
+
+#Sampling to get a visual representation of the sample structure
+#:- Change stratified sample size as per requirement
+london_smart_meter = stratified(smart_meter_london, "Acorn_grouped", .008)
+
+#Visualising data structure
+
+ visdat::vis_dat(london_smart_meter)
+# Removing created variable for memory management
+rm(london_smart_meter)
+
+```
+
+
+
+### Correlation map
+
+
+```{r}
+# Create Correlation map of variables
+
+corr.set <- select_if(smart_meter_london,is.numeric)
+corr.matrix = round(cor(corr.set[,-2]),2)
+corr.matrix 
+
+# Correlation Heat Map - Upper Triangle
+
+get_upper_tri <- function(corr.matrix){
+    corr.matrix[lower.tri(corr.matrix)]= NA
+    return(corr.matrix)
+}
+
+# using upper triangle function to return the upper half of the correlation map
+
+upper_tri <- get_upper_tri(corr.matrix)
+upper_tri
+
+# Correlation Heat Map - Upper Triangle
+
+melt_cormat <- melt(upper_tri, na.rm = TRUE)
+
+# Heatmap
+
+ggheatmap = ggplot(data = melt_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+
+# Adding correlation coefficients on the heatmap
+
+corelcoef = ggheatmap + geom_text(aes(Var2, Var1, label = value), color = "black", size = 2) +
+theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.ticks = element_blank(),
+  legend.justification = c(1, 0),
+  legend.position = c(0.6, 0.7),
+  legend.direction = "horizontal")+
+  guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                title.position = "top", title.hjust = 0.5))
+
+
+corelcoef
+```
+
+
+
+### Multiple Factor Analysis
+
+```{r}
+
+# removing variables that are unnecessary for MFA and the rest of the analysis.
+
+smart_meter_london$file = NULL
+smart_meter_london$energy_mean = NULL
+smart_meter_london$energy_max = NULL
+smart_meter_london$energy_std = NULL
+smart_meter_london$energy_median = NULL
+smart_meter_london$energy_count = NULL
+smart_meter_london$energy_min = NULL
+smart_meter_london$temperatureHigh = NULL
+smart_meter_london$summary = NULL
+
+#  selecting variables that will form the multiple factor analysis set.
+
+mfa_set = smart_meter_london[,3:18]
+
+# Removing unnecessary columns 
+mfa_set$Acorn = NULL
+
+# Re-ordering mfa set with categorical variables on one side and numerical on the other 
+mfa_set= mfa_set[,c(1,2,3,4,5,13,14,15,6,7,8,9,10,11,12)]
+
+
+# Removing unnecessary columns 
+
+mfa_set$year = NULL
+
+# Converting factors to numerical representations before passing them to the MfA
+
+mfa_set$Acorn_grouped = as.numeric(mfa_set$Acorn_grouped,"Adversity",1,"Affluent",2,"Comfortable",3)
+mfa_set$stdorToU = as.numeric(mfa_set$stdorToU,"Std",1,"ToU",2)
+mfa_set$precipType = as.numeric(mfa_set$precipType,"rain",1,"snow",2)
+mfa_set$icon = as.numeric(mfa_set$icon,"clear-day",1,"cloudy",2,"fog",3,
+                                      "partly-cloudy-day",4,"partly-cloudy-night",5,"wind",6)
+mfa_set$weekday = as.numeric(mfa_set$weekday,"Monday",1,"Tuesday",2,"Wednesday",3,"Thursday",4,"Friday",5,"Saturday",6,"Sunday",7)
+mfa_set$month = as.numeric(mfa_set$weekday,"January",1,"Febuary",2,"March",3,"April",4,"May",5,"June",6,"July",7,"August",8,"September",9,"October",10,"November",11,"December")
+mfa_set$energy_usage = as.numeric(mfa_set$energy_usage,"normal",0,"high",1)
+mlSetK = mfa_set
+
+SI = mfa_set$energy_sum
+usage = mfa_set$energy_usage
+mfa_set$energy_sum = NULL
+mfa_set$energy_usage = NULL
+
+# Applying MFA formula to dataset
+
+res.mfa <- MFA(mfa_set,
+group = c(6,6),
+type = c("c","s"),
+name.group = c("categorical","numerical"),
+num.group.sup = NULL,
+graph = FALSE)
+
+# Extract Eignvalues and their cummulative sum
+
+get_eigenvalue(res.mfa)
+
+# Scree plot
+
+fviz_screeplot(res.mfa)
+
+# Visualizing multiple factor through variable contribution to pc1 
+
+fviz_contrib(res.mfa, "group", axes = 1)
+
+# Visualizing multiple factor through variable contribution to pc2
+
+fviz_contrib(res.mfa, "group", axes = 2)
+
+# Showing contribution seperated by categorical and numerical variables
+
+fviz_mfa_var(res.mfa, "quanti.var", palette = "jco",
+col.var.sup = "violet", repel = TRUE)
+
+
+# Plotting contribution of variables using bar chart representation
+# Linear combination of variables that contribute to most of the variance in dimension 1
+fviz_contrib(res.mfa, choice = "quanti.var", axes = 1, top = 20,
+palette = "jco")
+
+# Linear combination of variables that contribute to most of the variance in dimension 2 
+fviz_contrib(res.mfa, choice = "quanti.var", axes = 2, top = 20,
+palette = "jco")
+
+# Linear combination of variables that contribute to most of the variance in dimension 3
+fviz_contrib(res.mfa, choice = "quanti.var", axes = 3, top = 20,
+palette = "jco")
+
+# Linear combination of variables that contribute to most of the variance in dimension 4
+fviz_contrib(res.mfa, choice = "quanti.var", axes = 4, top = 20,
+palette = "jco")
+
+# Linear combination of variables that contribute to most of the variance in dimension 4
+fviz_contrib(res.mfa, choice = "quanti.var", axes = 5, top = 20,
+palette = "jco")
+
+
+# Extracting the PC's from the model 
+g = res.mfa$global.pca$ind$contrib
+
+# changing the type of output from matrix to dataframe
+MlDataJ = as.data.frame(g)
+
+# Appending the usage back column back to the dataframe
+MlDataJ$energy_usage = usage
+
+# Making energy usage more comprehensible by assigning 1 to high energy consumption and 0 to normal
+MlDataJ$energy_usage = ifelse(MlDataJ$energy_usage== 2,1,0)
+
+rm(mfa_set)
+```
+
+
+### Energy Consumption - Uni-variate     
+
+```{r}
+
+# Aggregation
+
+n = nrow(smart_meter_london)
+
+# Consumption according to grouped Acorn
+smart_meter_london %>% 
+  group_by(Acorn_grouped) %>% 
+  summarise(total_energy = sum(energy_sum)) %>%  
+  ggplot(aes(x=Acorn_grouped,y=total_energy)) + 
+  geom_col(fill="dodgerblue3",alpha=0.9) + 
+  xlab("") + 
+  ylab("Energy Consumption (2012-2014) in total Kilowatt consumed") + 
+  labs(title = "Energy Consumption VS. Socio-economic Status") + 
+  theme_minimal()
+
+# Histogram showing distribution of numerical variables 
+
+par(mfrow=c(3,2))
+hist(smart_meter_london$windSpeed,col = "dodgerblue3",main = "Distribution of Windspeed",xlab =NULL,ylab=NULL)
+hist(smart_meter_london$humidity, col = "dodgerblue3",main = "Distribution of Temperature",xlab =NULL,ylab=NULL)
+hist(smart_meter_london$cloudCover, col = "dodgerblue3",main = "Distribution of CloudCover",xlab =NULL,ylab=NULL)
+hist(smart_meter_london$visibility, col = "dodgerblue3",main ="Distribution of Visibility ",xlab = NULL,ylab=NULL)
+
+
+# Energy Consumption from 2011-2014
+smart_meter_london %>%
+ ggplot(aes(x=date,y=energy_sum,color=Acorn_grouped)) + geom_smooth(err=FALSE,se=FALSE)+ ylab("Energy Consumption (2012-2014)in Kilowatt per day") + labs(title = "Energy Consumption VS. Socio-economic Status")+
+    theme_classic()
+
+smart_meter_london %>%
+ ggplot(aes(x=date,y=energy_sum,color=stdorToU)) + geom_smooth(err=FALSE,se=FALSE)+
+    theme_classic()+ ylab("Energy Consumption (2012-2014)in Kilowatt per day") + labs(title = "Energy Consumption VS. std or tou")
+
+
+# Weather and Energy Consumption
+smart_meter_london %>% 
+  group_by(icon) %>% 
+  summarise(total_energy = sum(energy_sum),icon) %>% 
+  ggplot(aes(x=icon)) + geom_bar(fill="dodgerblue3",alpha=0.9) + xlab("Weather") + ylab("Energy Consumption (2012-2014)in total Kilowatts consumed") + labs(title = "Energy Consumption VS. Weather") + theme_minimal()
+  
+# Energy Consumption VS. Month
+smart_meter_london %>% 
+  select(energy_sum,month) %>% 
+  arrange(desc(energy_sum)) %>% 
+  ggplot(aes(x=month)) +  geom_bar(fill="dodgerblue3",alpha=0.9) + xlab("Month") + ylab("Energy Consumption (2012-2014)in total Kilowatts consumed") + labs(title = "Energy Consumption VS. Month") + theme_minimal()
+
+
+# Energy consumption VS. Weekday
+smart_meter_london %>% 
+  select(energy_sum,weekday) %>% 
+  ggplot(aes(x=weekday)) +   geom_bar(fill="dodgerblue3",alpha=0.9) + xlab("Weekday") + ylab("Energy Consumption (2012-2014)in total Kilowatts consumed") + labs(title = "Energy Consumption VS. Weekday") + theme_minimal() 
+
+geom_text(aes(label = signif(ave_lifeExp, digits = 3)), nudge_y = 4)
+
+
+# Energy Consumption breakdown According to grouped acorn
+smart_meter_london %>% 
+    group_by(Acorn,energy_sum,energy_usage,Acorn_grouped) %>% 
+    summarise(energy_total = sum(energy_sum)) %>% 
+    count(Acorn_grouped,Acorn,energy_sum,energy_usage) %>% 
+    ggplot(aes(x=Acorn,color=Acorn_grouped)) + 
+    geom_bar(stat = "count",position ="stack",fill="white",alpha=0.4) +
+    theme_classic() + theme(axis.text.x = element_text(face="bold", color="black", 
+                           size=11, angle=100)) + xlab("") + 
+  ylab("Energy Consumption (2012-2014)in total Kilowatts ")
+
+```
+
+
+
+### Energy Consumption - Bi-variate plots
+
+```{r}
+
+
+# Expressing Monthly data as seasonal quarters
+## Get the months of observations
+smart_meter_london$month <- factor(format(smart_meter_london$date, format = "%b"), levels = month.abb)
+## Format for the seasonal quarters
+smart_meter_london$quarter <- character(length = NROW(smart_meter_london))
+
+ 
+# Creating Quarters of the year
+smart_meter_london$quarter[smart_meter_london$month %in% month.abb[c(12,1,2)]] <- "Winter"
+smart_meter_london$quarter[smart_meter_london$month %in% month.abb[c(3:5)]] <- "Spring"
+smart_meter_london$quarter[smart_meter_london$month %in% month.abb[c(6:8)]] <- "Summer"
+smart_meter_london$quarter[smart_meter_london$month %in% month.abb[c(9:11)]] <- "Autumn"
+smart_meter_london$quarter <- as.factor(smart_meter_london$quarter)
+
+# Plotting energy_consumption in function of the temperature
+ggplot(data = smart_meter_london, aes(x = temperatureMax, y = energy_sum)) + geom_smooth(aes(color = quarter),se=FALSE) +
+scale_fill_manual(values = c("#00AFBB", "#E7B800", "#FC4E07","#CC0000", "#006600", "#669999", "#00CCCC", "#660099", "#CC0066", "#FF9999", "#FF9900", "black"))+ labs(title = "Energy consumption v/s Max temp") +
+    theme_classic()+ ylab("Energy Consumption (2012-2014)in Kilowatt per day") + labs(title = "Energy Consumption VS. Quarter")
+
+
+
+# Plotting Energy consumption against other features 
+  #Energy v/s Temperature
+ggplot()+
+geom_smooth(data=smart_meter_london, aes(x=temperatureMax,y=energy_sum,col="TemperatureMax"), se=F,)+
+geom_smooth(data=smart_meter_london, aes(x=temperatureMin,y=energy_sum,colour="TemperatureMin"), se=F)+ theme_linedraw()+labs(title = "Energy consumption v/s Temperature", x = "Temperature", y = "Energy consumption Kwh") +
+    theme_classic()
+
+
+#Energy v/s visibility
+ggplot(data = smart_meter_london, aes(x = visibility, y = energy_usage)) + geom_boxplot(aes(fill = energy_usage))  + scale_fill_brewer(palette="BrBG")+ labs(title = "Energy consumption v/s visibility")
+
+ 
+
+#Energy consumption v/s cloudCover
+ggplot(data = smart_meter_london, aes(x = cloudCover, y = energy_usage)) + geom_boxplot(aes(fill = energy_usage))  + scale_fill_brewer(palette="Dark1")+ labs(title = "Energy consumption v/s cloudCover")
+
+ 
+
+#Energy consumption v/s humidity
+ggplot(data = smart_meter_london, aes(x = humidity, y = energy_usage)) + geom_boxplot(aes(fill = energy_usage)) + scale_fill_brewer(palette="Dark2") + labs(title = "Energy consumption v/s humidity")
+
+
+
+```
+
+
+### Self-organising maps
+
+
+```{r}
+
+# Positioning energy usage first and removing variables that are not neccesary for analysis 
+mlSetK =dplyr::relocate(mlSetK,energy_usage ,.before=weekday)
+mlSetK =dplyr::select(mlSetK,energy_usage:month,temperatureMax:humidity)
+numericmlSetK= dplyr::select(mlSetK,temperatureMax:humidity)
+m= scale(mlSetK)
+
+
+# Setting seed for reproducibility
+set.seed(112)
+
+# Setting the self organising map grid layout
+g = somgrid(xdim = 3,ydim =3, topo = "hexagonal")
+
+# Initiate and train the self organising map with hyperparameters for 500 iterations
+map = som(m,grid=g,alpha=c(0.05,0.01),
+          radius=1, rlen=500)
+
+# Visualising error rate for SOM
+f =plot(map,type ='changes')
+
+# Visualising codes plot for SOM
+plot(map,
+     type = "codes",
+     palette.name = rainbow,
+     )
+
+# Visualising distance between neighbours
+k = plot(map,
+     type = "dist.neighbours"
+     )
+```
+
+
+## Machine Learning Prediction 
+
+### Pre-processing data for Machine Learning ClassifierK
+
+```{r}
+
+#Removing the features that were identified as less interesting for modelling
+mlSetK$Acorn = NULL
+mlSetK$energy_sum =NULL
+# Removing the unncesary rownames from the dataset
+mlSetK = remove_rownames(mlSetK)
+# Convert energy and other variables to  factors
+mlSetK$weekday= as.factor(mlSetK$weekday) 
+mlSetK$month = as.factor(mlSetK$month) 
+mlSetK$energy_usage =ifelse(mlSetK$energy_usage==1,0,1)
+mlSetK$energy_usage =as.factor(mlSetK$energy_usage)
+# Selecting the numeric variables for scaling
+x = dplyr::select(mlSetK,temperatureMax:humidity)
+y= dplyr::select(mlSetK,energy_usage:month)
+scaled_numericals= MinMax(x)
+# putting back the scaled variables into the dataset
+mlSetk = cbind(y,scaled_numericals)
+# Scaling dataset for classifierK
+split_smK = sample.split(mlSetK$energy_usage,SplitRatio = 0.70)
+training_setK = subset(mlSetK,split_smK == TRUE)
+test_setK = subset(mlSetK,split_smK == FALSE)
+
+```
+
+
+###  Scaling dataset & Splitting data into test and training set- Classifier ForestJ
+```{r}
+# Removing row names from the dataset
+MlDataJ = remove_rownames(MlDataJ)
+#Splitting dataset 
+split_smJ = sample.split(MlDataJ$energy_usage,SplitRatio = 0.70)
+training_setJ = subset(MlDataJ,split_smJ == TRUE)
+test_setJ = subset(MlDataJ,split_smJ == FALSE)
+
+```
+
+
+
+### Randomforestk
+
+```{r}
+start_time = Sys.time()
+# Setting seed for replicating results
+set.seed(40)
+# generating the classifier for randomforestK
+ classifierk = randomForest(x=training_setK[,-1],
+                            y=training_setK$energy_usage,ntree= 3200,
+                            type="class",
+                            mtry=2,
+                            importance = TRUE)
+print(classifierk)
+# Plotting variable of importance
+varImpPlot(classifierk)
+# Using Classifier to predict energy consumption in test set
+y_predk = predict(classifierk,test_setK[,-1])
+# Generating Confusion matrix and other important metrics
+cfK= confusionMatrix(table(y_predk,test_setK[,1]))
+print(cfK)
+# # K-fold cross validation
+# fitcontrolK = trainControl(method = "repeatedcv",number = 10,
+#                            search = "random",repeats =1
+#                            ,savePredictions = T)
+# 
+# # Training cross validation model
+# #:- Please note this code takes 1.6 hours depending on CPU performance
+# modelfitK = train(x = training_setK[,-1],
+#                 y = training_setK$energy_usage,
+#                 method = "rf",
+#                 trControl = fitcontrolK,
+#                 tuneLength = 10,
+#                 ntree=3000)
+# #Identifying the right number of mtry
+# print(modelfitK$bestTune)
+# plot(modelfitK)
+# # plotting the variable importance
+# plot(varImp(modelfitK,scale=F),main="Variables of importance for ModelK :RF 10 FOLD CV")
+#Calculate end run time
+end_time <- Sys.time()
+total_time = end_time - start_time
+print(total_time)
+```
+Note :-  The code for cross validation has been commented out due to the time it requires for computation.
+
+### AUC-ROC ClassifierK
+
+```{r}
+
+# plotting ROC-AUC
+ROSE::roc.curve(test_setK$energy_usage,y_predk,col="green",main="ROC curve ClassifierK")
+```
+
+
+
+
+### RandomforestJ
+
+```{r,eval=FALSE}
+start_time2 = Sys.time()
+
+# Transforming energy_usage as factor
+training_setJ$energy_usage = as.factor(training_setJ$energy_usage)
+# Setting seed for the reproducibility of the model
+set.seed(10)
+# Building classifier model from principal component dimensions
+classifierj = randomForest(formula=training_setJ$energy_usage~.,
+                           ntree= 3200,
+                           type="class",
+                           mtry=3,
+                           data=training_setJ,importance=TRUE)
+print(classifierj)
+# Varialble Importance in the classification
+varImpPlot(classifierj)
+# predicting test set results
+y_predJ = predict(classifierj,newdata = test_setJ[-6])
+# Confusion matrix 
+cfJ = confusionMatrix(table(y_predJ,test_setJ[,6]))
+print(cfJ)
+# # # K-fold cross validation
+# # fitcontrolJ = trainControl(method = "repeatedcv",number = 10,
+# #                            search = "random",repeats =1
+# #                            ,savePredictions = T)
+# # Training cross validation model
+# # :- Please note this code takes 1.6 hours depending on CPU performance
+# # modelfitJ = train(x = training_setJ[,-6],
+# #                 y = training_setJ$energy_usage,
+# #                 method = "rf",
+# #                 trControl = fitcontrolJ,
+# #                 tuneLength = 10,
+# #                 ntree=3000)
+# # #Identifying the right number of mtry
+# # modelfitJ$bestTune
+# # #PLotting validation model
+# # plot(modelfitJ)
+# # # plotting the variable importance
+# plot(varImp(modelfitJ,scale=F),main="Variables of importance for ModelJ :RF 10 FOLD CV")
+# # Finding out which variables were contributing most to the model
+# fviz_contrib(res.mfa, choice = "quanti.var", axes = 4, top = 20,
+# palette = "jco")
+# 
+# fviz_contrib(res.mfa, choice = "quanti.var", axes = 2, top = 20,
+# palette = "jco")
+# 
+# fviz_contrib(res.mfa, choice = "quanti.var", axes = 5, top = 20,
+# palette = "jco")
+#Calculate end run time
+end_time2 <- Sys.time()
+total_time2 = end_time2 - start_time2
+print(total_time2)
+```
+Note :-  The code for cross validation has been commented out due to the time it requires for computation.
+
+### AUC-ROC ClassifierJ
+
+```{r,eval=FALSE}
+roc.curve(test_setJ$energy_usage,y_predJ,col="red",main="ROC curve ClassifierJ")
+
+```
+
+
+### Comparing Classifier K and J Model Performance metrics 
+
+```{r,eval=FALSE}
+# Preparing variables to evaluate and compare model performance.
+cmK= table(y_predk,test_setK$energy_usage)
+cmJ= table(y_predJ,test_setJ$energy_usage)
+# number of instances
+nK = sum(cmK)
+nJ = sum(cmJ) 
+# number of classes
+ncK = nrow(cmK)
+ncJ = nrow(cmJ) 
+# number of correctly classified instances per class 
+diagK = diag(cmK) 
+diagJ = diag(cmJ) 
+# number of instances per class
+rowsumsK = apply(cmK, 1, sum) 
+rowsumsJ = apply(cmJ, 1, sum) 
+# number of predictions per class
+colsumsK = apply(cmK, 2, sum) 
+colsumsJ = apply(cmJ, 2, sum) 
+# distribution of instances over the actual classes
+pK = rowsumsK / n 
+pJ = rowsumsJ / n 
+# distribution of instances over the predicted classes
+qJ = colsumsK / n 
+qK = colsumsJ / n 
+
+cmK = table(y_predk,test_setK$energy_usage)
+cmJ = table(y_predJ,test_setJ$energy_usage)
+
+# Calculating accuracy of all three models 
+accuracyK = sum(diagK) /nK
+accuracyJ = sum(diagJ) /nJ
+
+# Calculating precision between the three models
+ precisionK = diagK / colsumsK 
+ precisionJ = diagJ / colsumsJ 
+ # Calculating recall between three models 
+ recallK = diagK / rowsumsK 
+ recallJ = diagJ / rowsumsK 
+ # Calculating F1 between all three models.
+ f1K = 2 * precisionK * recallK / (precisionK + recallK) 
+ f1J = 2 * precisionJ * recallJ / (precisionJ + recallJ) 
+ # Storing the results within a data frame
+evalK = data.frame(precisionK, recallK, f1K) 
+evalJ = data.frame(precisionJ, recallJ, f1J) 
+# Final Evaluation
+evalK
+evalJ
+```
+
+
+
+
+## References 
+
+[1] Stratified Sampling Code - https://gist.github.com/mrdwab/6424112
+
+
+
