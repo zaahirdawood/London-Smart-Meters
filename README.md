@@ -1,2 +1,2 @@
 # London-Smart-Meters
-Classifying energy usage for customers using smart meters.
+Classifying days where energy usage is expected to soar to help customers get the most of their smart meters.
